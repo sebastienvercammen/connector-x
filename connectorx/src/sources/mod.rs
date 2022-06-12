@@ -11,6 +11,8 @@ pub mod dummy;
 pub mod mssql;
 #[cfg(feature = "src_mysql")]
 pub mod mysql;
+#[cfg(feature = "src_odbc")]
+pub mod odbc;
 #[cfg(feature = "src_oracle")]
 pub mod oracle;
 #[cfg(feature = "src_postgres")]

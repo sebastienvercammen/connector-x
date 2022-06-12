@@ -4,11 +4,9 @@
 // use std::collections::HashMap;
 // use uuid::Uuid;
 
-
 // https://docs.rs/odbc-api/latest/odbc_api/enum.DataType.html
 // use postgres::types::Type; // Replace with ODBC's
 use odbc_api::DataType;
-
 
 #[derive(Copy, Clone, Debug)]
 pub enum ODBCTypeSystem {
@@ -22,15 +20,14 @@ impl_typesystem! {
     }
 }
 
-
-impl<'a> From<&'a DataType> for ODBCTypeSystem {
-    fn from(ty: &'a DataType, nullable: bool) -> ODBCTypeSystem {
+impl<'a> From<(&'a DataType, bool)> for ODBCTypeSystem {
+    fn from(ty_null: (&'a DataType, bool)) -> ODBCTypeSystem {
         use ODBCTypeSystem::*;
 
+        let (ty, nullable) = ty_null;
         match ty {
-            Integer => Integer(nullable), 
+            DataType::Integer => Integer(nullable),
+            _ => unimplemented!("{}", format!("odb type {:?} not supported", ty)),
         }
     }
 }
-
-
