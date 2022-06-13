@@ -70,7 +70,8 @@ impl Source for ODBCSource {
 
     #[throws(ODBCSourceError)]
     fn fetch_metadata(&mut self) {
-        // TODO: need to get the metadata (fill in column names to self.names, and column types to self.schema)
+        // TODO: need to get the metadata from database without really fetching the query result
+        // (fill in column names to self.names, and column types to self.schema)
     }
 
     #[throws(ODBCSourceError)]
@@ -224,25 +225,25 @@ impl<'a> PartitionParser<'a> for ODBCSourcePartitionParser<'a> {
 
     #[throws(ODBCSourceError)]
     fn fetch_next(&mut self) -> (usize, bool) {
-        if self.current_row > 0 {
-            self.rows = OwningHandle::new_with_fn(
-                self.rows.into_owner(),
-                |cursor: *const RowSetCursor<
-                    CursorImpl<StatementConnection<'a>>,
-                    &'a mut TextRowSet,
-                >| unsafe {
-                    DummyBox(
-                        (&mut *(cursor
-                            as *mut RowSetCursor<
-                                CursorImpl<StatementConnection<'a>>,
-                                &'a mut TextRowSet,
-                            >))
-                            .fetch()
-                            .unwrap(),
-                    )
-                },
-            );
-        }
+        // if self.current_row > 0 {
+        //     self.rows = OwningHandle::new_with_fn(
+        //         self.rows.into_owner(),
+        //         |cursor: *const RowSetCursor<
+        //             CursorImpl<StatementConnection<'a>>,
+        //             &'a mut TextRowSet,
+        //         >| unsafe {
+        //             DummyBox(
+        //                 (&mut *(cursor
+        //                     as *mut RowSetCursor<
+        //                         CursorImpl<StatementConnection<'a>>,
+        //                         &'a mut TextRowSet,
+        //                     >))
+        //                     .fetch()
+        //                     .unwrap(),
+        //             )
+        //         },
+        //     );
+        // }
 
         let num_rows: usize = match *self.rows {
             Some(batch) => batch.num_rows(),
