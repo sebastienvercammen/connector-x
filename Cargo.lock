@@ -2761,9 +2761,9 @@ dependencies = [
 
 [[package]]
 name = "odbc-api"
-version = "0.44.3"
+version = "0.45.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e36c5a07ad0f62f701fbdef7fe90b026e1e48975929dae14cd89a029db910ef6"
+checksum = "48c686e0ba223b91a8f99255d5e0aff554d197075b28ffa5db8ce7c99d71e32d"
 dependencies = [
  "force-send-sync",
  "log",
@@ -4868,9 +4868,9 @@ dependencies = [
 
 [[package]]
 name = "widestring"
-version = "0.5.1"
+version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "17882f045410753661207383517a6f62ec3dbeb6a4ed2acce01f0728238d1983"
+checksum = "653f141f39ec16bba3c5abe400a0c60da7468261cc2cbf36805022876bc721a8"
 
 [[package]]
 name = "winapi"

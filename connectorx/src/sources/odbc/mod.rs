@@ -1,33 +1,41 @@
-//! Source implementation for SQLite embedded database.
+// Submodules 
+mod errors; // odbc errors 
+mod typesystem; // Maps ODBC Datatypes to Rust Datatypes 
+pub use self::errors::ODBCSourceError; // public so library users can access 
+pub use self::typesystem::ODBCTypeSystem; // public so library users can access 
 
-mod errors;
-mod typesystem;
-
-pub use self::errors::ODBCSourceError;
-pub use self::typesystem::ODBCTypeSystem;
+// Internal Libraries 
 use crate::{
-    constants::DB_BUFFER_SIZE,
-    data_order::DataOrder,
-    errors::ConnectorXError,
-    sources::{PartitionParser, Produce, Source, SourcePartition},
-    sql::{count_query, limit1_query, CXQuery},
-    utils::DummyBox,
+    constants::DB_BUFFER_SIZE, // ODBC uses Batch Size (Number of Rows)
+    data_order::DataOrder, // row or column. 
+    errors::ConnectorXError, // errors 
+    sources::{PartitionParser, Produce, Source, SourcePartition}, // Traits required to implement Source
+    sql::{count_query, limit1_query, CXQuery}, // handles queries 
+    utils::DummyBox, // What the heck is this? 
 };
-use anyhow::anyhow;
-use datafusion::logical_plan::Column;
-use fehler::{throw, throws};
+
+// ODBC Library - Up to me, depending on what I need. 
 use odbc_api::{
     buffers::{ColumnarBuffer, TextColumn, TextRowSet},
     Connection, Cursor, CursorImpl, Environment, ResultSetMetadata, RowSetCursor,
     StatementConnection,
 };
-use owning_ref::OwningHandle;
+
+// Error Handling Libraries 
+use anyhow::anyhow;
+use fehler::{throw, throws};
+
+
+use owning_ref::OwningHandle; // ASK 
+
+
+
 
 pub struct ODBCSource {
     env: Environment,
     dsn: String,
     origin_query: Option<String>,
-    queries: Vec<CXQuery<String>>,
+    queries: Vec<CXQuery<String>>, // where is this from? 
     names: Vec<String>,
     schema: Vec<ODBCTypeSystem>,
 }
@@ -48,7 +56,7 @@ impl ODBCSource {
 }
 
 impl Source for ODBCSource {
-    const DATA_ORDERS: &'static [DataOrder] = &[DataOrder::RowMajor];
+    const DATA_ORDERS: &'static [DataOrder] = &[DataOrder::RowMajor]; // DataOrder is Row
     type Partition = ODBCSourcePartition;
     type TypeSystem = ODBCTypeSystem;
     type Error = ODBCSourceError;
@@ -60,6 +68,7 @@ impl Source for ODBCSource {
         }
     }
 
+    // what the heck does this do? 
     fn set_queries<Q: ToString>(&mut self, queries: &[CXQuery<Q>]) {
         self.queries = queries.iter().map(|q| q.map(Q::to_string)).collect();
     }
@@ -72,6 +81,12 @@ impl Source for ODBCSource {
     fn fetch_metadata(&mut self) {
         // TODO: need to get the metadata from database without really fetching the query result
         // (fill in column names to self.names, and column types to self.schema)
+
+        // let db_connection = odbc_env.connect("mypostgresdb", "andyw", "")?; // Issue: authentication. 
+        // if let Some(mut cursor) = db_connection.execute(metadata_query, parameters)? {
+        //     fetch_metadata(&mut cursor)?;
+        // }
+
     }
 
     #[throws(ODBCSourceError)]
@@ -89,6 +104,7 @@ impl Source for ODBCSource {
         self.schema.clone()
     }
 
+    // creates partitions based on number of queries
     #[throws(ODBCSourceError)]
     fn partition(self) -> Vec<Self::Partition> {
         let mut ret = vec![];
@@ -103,14 +119,17 @@ impl Source for ODBCSource {
     }
 }
 
+
+// ODBC Source Partition
+
 pub struct ODBCSourcePartition {
     env: Environment,
-    buffer: TextRowSet,
+    buffer: TextRowSet, // unique 
     dsn: String,
-    query: CXQuery<String>,
+    query: CXQuery<String>, // only one, as source has multiple 
     schema: Vec<ODBCTypeSystem>,
-    nrows: usize,
-    ncols: usize,
+    nrows: usize, // unique 
+    ncols: usize, // unique 
 }
 
 impl ODBCSourcePartition {
