@@ -166,6 +166,8 @@ pub mod prelude {
     pub use crate::sources::mssql::MsSQLSource;
     #[cfg(feature = "src_mysql")]
     pub use crate::sources::mysql::MySQLSource;
+    #[cfg(feature = "src_odbc")]
+    pub use crate::sources::odbc::ODBCSource;
     #[cfg(feature = "src_oracle")]
     pub use crate::sources::oracle::OracleSource;
     #[cfg(feature = "src_postgres")]

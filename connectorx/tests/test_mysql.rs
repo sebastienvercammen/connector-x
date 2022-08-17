@@ -24,13 +24,6 @@ fn test_mysql() {
 
     let builder = MySQLSource::<BinaryProtocol>::new(&dburl, 2).unwrap();
     let mut destination = ArrowDestination::new();
-    let dispatcher = Dispatcher::<_, _, MySQLArrowTransport<BinaryProtocol>>::new(
-        builder,
-        &mut destination,
-        &queries,
-        Some(String::from("select * from test_table")),
-    );
-    dispatcher.run().unwrap();
 
     let result = destination.arrow().unwrap();
     verify_arrow_results(result);

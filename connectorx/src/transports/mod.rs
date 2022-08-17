@@ -16,6 +16,8 @@ mod mssql_arrow2;
 mod mysql_arrow;
 #[cfg(all(feature = "src_mysql", feature = "dst_arrow2"))]
 mod mysql_arrow2;
+#[cfg(all(feature = "src_odbc", feature = "dst_arrow"))]
+mod odbc_arrow;
 #[cfg(all(feature = "src_oracle", feature = "dst_arrow"))]
 mod oracle_arrow;
 #[cfg(all(feature = "src_oracle", feature = "dst_arrow2"))]
@@ -45,6 +47,8 @@ pub use mssql_arrow2::{MsSQLArrow2Transport, MsSQLArrow2TransportError};
 pub use mysql_arrow::{MySQLArrowTransport, MySQLArrowTransportError};
 #[cfg(all(feature = "src_mysql", feature = "dst_arrow2"))]
 pub use mysql_arrow2::{MySQLArrow2Transport, MySQLArrow2TransportError};
+#[cfg(all(feature = "src_odbc", feature = "dst_arrow"))]
+pub use odbc_arrow::{ODBCArrowTransport, ODBCArrowTransportError};
 #[cfg(all(feature = "src_oracle", feature = "dst_arrow"))]
 pub use oracle_arrow::{OracleArrowTransport, OracleArrowTransportError};
 #[cfg(all(feature = "src_oracle", feature = "dst_arrow2"))]

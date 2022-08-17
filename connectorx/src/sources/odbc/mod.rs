@@ -11,7 +11,6 @@ use crate::{
     errors::ConnectorXError, // errors 
     sources::{PartitionParser, Produce, Source, SourcePartition}, // Traits required to implement Source
     sql::{count_query, limit1_query, CXQuery}, // handles queries 
-    utils::DummyBox, // What the heck is this? 
 };
 
 // ODBC Library - Up to me, depending on what I need. 
@@ -21,32 +20,38 @@ use odbc_api::{
     StatementConnection,
 };
 
-// Error Handling Libraries 
-use anyhow::anyhow;
-use fehler::{throw, throws};
+use odbc_api::ColumnDescription;
+// use odbc_api::Cursor;
+use odbc_api::Nullability;
+use odbc_api::buffers::{BufferDescription, BufferKind, Item, ColumnarAnyBuffer};
+use odbc_api::DataType;
+use anyhow::Error;
 
 
-use owning_ref::OwningHandle; // ASK 
+use anyhow::anyhow; // Error Handling 
+use fehler::{throw, throws}; // Error Handling 
 
-
+use owning_ref::OwningHandle; // Rust Ownership 
+use crate::utils::DummyBox; // Rust Ownership 
 
 
 pub struct ODBCSource {
     env: Environment,
-    dsn: String,
+    connection_string: String,
     origin_query: Option<String>,
     queries: Vec<CXQuery<String>>, // where is this from? 
     names: Vec<String>,
     schema: Vec<ODBCTypeSystem>,
 }
 
+// Implement new ODBCSource
 impl ODBCSource {
     #[throws(ODBCSourceError)]
     pub fn new(conn: &str) -> Self {
-        let environment = Environment::new().unwrap();
+        let odbc_env = Environment::new().unwrap(); // creates ODBC Environment
         Self {
-            env: environment,
-            dsn: conn.to_string(),
+            env: odbc_env,
+            connection_string: conn.to_string(),
             origin_query: None,
             queries: vec![],
             names: vec![],
@@ -68,7 +73,6 @@ impl Source for ODBCSource {
         }
     }
 
-    // what the heck does this do? 
     fn set_queries<Q: ToString>(&mut self, queries: &[CXQuery<Q>]) {
         self.queries = queries.iter().map(|q| q.map(Q::to_string)).collect();
     }
@@ -86,13 +90,15 @@ impl Source for ODBCSource {
         // if let Some(mut cursor) = db_connection.execute(metadata_query, parameters)? {
         //     fetch_metadata(&mut cursor)?;
         // }
-
     }
 
     #[throws(ODBCSourceError)]
     fn result_rows(&mut self) -> Option<usize> {
-        // TODO: get the number of rows of the entire query without fetching the query's result
-        // Can take a look at sql::count_query
+        // Issue: Lifetimes. For there to be any operation on the odbc environment, 
+        // we need to create a connection. However, this connection must have the same lifetime as the environment.
+        
+        // TODO: This is essentially the same as my function! 
+
         None
     }
 
@@ -104,13 +110,12 @@ impl Source for ODBCSource {
         self.schema.clone()
     }
 
-    // creates partitions based on number of queries
     #[throws(ODBCSourceError)]
     fn partition(self) -> Vec<Self::Partition> {
         let mut ret = vec![];
         for query in self.queries {
             ret.push(ODBCSourcePartition::new(
-                self.dsn.clone(),
+                self.connection_string.clone(),
                 &query,
                 &self.schema,
             ));
@@ -119,13 +124,10 @@ impl Source for ODBCSource {
     }
 }
 
-
-// ODBC Source Partition
-
 pub struct ODBCSourcePartition {
     env: Environment,
     buffer: TextRowSet, // unique 
-    dsn: String,
+    connection_string: String,
     query: CXQuery<String>, // only one, as source has multiple 
     schema: Vec<ODBCTypeSystem>,
     nrows: usize, // unique 
@@ -133,11 +135,11 @@ pub struct ODBCSourcePartition {
 }
 
 impl ODBCSourcePartition {
-    pub fn new(dsn: String, query: &CXQuery<String>, schema: &[ODBCTypeSystem]) -> Self {
+    pub fn new(connection_string: String, query: &CXQuery<String>, schema: &[ODBCTypeSystem]) -> Self {
         Self {
             env: Environment::new().unwrap(),
             buffer: ColumnarBuffer::new(vec![]),
-            dsn,
+            connection_string,
             query: query.clone(),
             schema: schema.to_vec(),
             nrows: 0,
@@ -157,20 +159,53 @@ impl SourcePartition for ODBCSourcePartition {
         // Can take a look at sql::count_query
     }
 
+
+
     #[throws(ODBCSourceError)]
     fn parser(&mut self) -> Self::Parser<'_> {
+
+        let conn = self.env.connect_with_connection_string(&self.connection_string).unwrap();
+        
+        let metadata_query = "SELECT * FROM cities LIMIT 1;";
+        let mut cursor = conn.execute(metadata_query, ()).unwrap().unwrap();
+        
+
+        // Buffer Init
+        // let batch_size = 1000; // Maximum number of rows in each row set
+        // let buffer_description_list = [
+        //     BufferDescription {
+        //         kind: BufferKind::Text { max_str_len: 80 },
+        //         nullable: true,
+        //     },
+        //     BufferDescription {
+        //         kind: BufferKind::I32,
+        //         nullable: true,
+        //     }
+        // ];
+    
+        // // Allocates a ColumnarBuffer fitting the buffer descriptions.
+        // // capacity in usize
+        // // Iterator whose items are buffer description
+        // let buffer = ColumnarAnyBuffer::from_description(
+        //     batch_size,
+        //     buffer_description_list.iter().copied() // See Iterators and Copy vs Clone
+        // );
+        let mut buffer = init_buffer();
+
+        let mut row_set_cursor = cursor.bind_buffer(&mut buffer).unwrap();
+
         // TODO: change the fake connection (e.g. username, password) to real one
         // with input connection string (dsn)
-        let connection = self
-            .env
-            .connect("YourDatabase", "SA", "My@Test@Password1")
-            .unwrap();
-        let mut cursor = connection
-            .into_cursor(self.query.as_str(), ())
-            .unwrap()
-            .unwrap();
-        self.buffer = TextRowSet::for_cursor(DB_BUFFER_SIZE, &mut cursor, Some(4096)).unwrap();
-        let row_set_cursor = cursor.bind_buffer(&mut self.buffer).unwrap();
+        // let connection = self
+        //     .env
+        //     .connect("YourDatabase", "SA", "My@Test@Password1")
+        //     .unwrap();
+        // let mut cursor = connection
+        //     .into_cursor(self.query.as_str(), ())
+        //     .unwrap()
+        //     .unwrap();
+        // self.buffer = TextRowSet::for_cursor(DB_BUFFER_SIZE, &mut cursor, Some(4096)).unwrap();
+        // let row_set_cursor = cursor.bind_buffer(&mut self.buffer).unwrap();
 
         ODBCSourcePartitionParser::new(row_set_cursor, &self.schema)?
     }
@@ -296,4 +331,128 @@ impl<'r, 'a> Produce<'r, i32> for ODBCSourcePartitionParser<'a> {
     }
 }
 
-// TODO: implement produce for Option<i32>
+impl<'r, 'a> Produce<'r, Option<i32>> for ODBCSourcePartitionParser<'a> {
+    type Error = ODBCSourceError;
+
+    #[throws(ODBCSourceError)]
+    fn produce(&'r mut self) -> Option<i32> {
+        println!("What is going on");
+
+        return Some(0);
+    }
+}
+
+
+// Andy Helper Functions 
+
+// for each column in row, describe the column 
+// fn fetch_metadata(cursor: &mut impl Cursor, odbc_source: &mut ODBCSource) -> Result<(), Error> {
+//     let columns = cursor.num_result_cols()?;
+
+//     let mut column_description = ColumnDescription::default(); // Returns default value - like new()
+
+
+//     for column_number in 1..(columns+1) { // column number starts at 1
+
+//         cursor.describe_col(column_number.try_into().unwrap(), &mut column_description)?; // load column description
+
+//         let col_name = column_description.name_to_string()?;
+//         odbc_source.names.push(col_name);
+
+//         let col_datatype = column_description.data_type;
+//         let col_nullable = matches!(column_description.nullability, Nullability::Nullable);
+
+//         // This will be replaced by 
+//         // let col_datatype = ODBCTypeSystem::from(col_datatype, col_nullable); 
+//         // how do you add the nullablility? 
+//         let col_datatype = match col_datatype {
+//             DataType::Integer => ODBCTypeSystem::Integer(col_nullable),
+//             DataType::WVarchar{..} => ODBCTypeSystem::WVarChar(col_nullable),
+//             _ => ODBCTypeSystem::Other(),
+//         };
+//         odbc_source.schema.push(col_datatype);
+
+//     }
+
+//     Ok(())
+// }
+
+fn get_table_rows(cursor: &mut impl Cursor) -> Result<(), Error> {
+    if let Some(mut cursor_row) = cursor.next_row()? {
+        let mut target: i32 = 0;
+        cursor_row.get_data(1, &mut target)?;
+        println!("{}", target);
+    } else {
+        println!("count_query returns nothing");
+    }
+    Ok(())
+}
+
+fn get_data_into_rust(cursor: impl Cursor) -> Result<(), Error> {
+
+    let mut buffer = init_buffer();
+
+    // Bind buffer to cursor. We bind the buffer as a mutable reference here, which makes it
+    // easier to reuse for other queries, but we could have taken ownership.
+    let mut row_set_cursor = cursor.bind_buffer(&mut buffer)?;
+
+    
+    // Loop over row sets
+    while let Some(row_set) = row_set_cursor.fetch()? {
+        println!("num valid rows {:?}", row_set.num_rows());
+        println!("num valid columns {:?}", row_set.num_cols());
+
+        // Process names in row set
+        let name_col = row_set.column(0);
+        for name in name_col
+            .as_text_view()
+            .expect("Name column buffer expected to be text")
+            .iter()
+        {
+            // Iterate over `Option<&CStr> ..
+            // returns Some Array Int
+            println!("{:?}", name);
+        }
+
+        // Process years in row set
+        let year_col = row_set.column(1);
+        // This does set it to i32! Or returns Enum Option None
+        for year in i32::as_nullable_slice(year_col) 
+            .expect("Year column buffer expected to be nullable Int")
+        {
+            // year is an option still. It can be None if nullable value in the postgresdb. 
+            if let Some(x) = year {
+                println!("{:?}", x);
+            } else {
+                println!("{:?} is a null value", year)
+            }
+        }
+    }
+
+    Ok(())
+
+}
+
+fn init_buffer() -> ColumnarAnyBuffer {
+    let batch_size = 1000; // Maximum number of rows in each row set
+    let buffer_description_list = [
+        BufferDescription {
+            kind: BufferKind::Text { max_str_len: 80 },
+            nullable: true,
+        },
+        BufferDescription {
+            kind: BufferKind::I32,
+            nullable: true,
+        }
+    ];
+
+    // Allocates a ColumnarBuffer fitting the buffer descriptions.
+    // capacity in usize
+    // Iterator whose items are buffer description
+    let buffer = ColumnarAnyBuffer::from_description(
+        batch_size,
+        buffer_description_list.iter().copied() // See Iterators and Copy vs Clone
+    );
+
+    buffer
+}
