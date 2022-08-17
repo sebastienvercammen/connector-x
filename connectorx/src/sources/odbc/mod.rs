@@ -219,11 +219,13 @@ impl SourcePartition for ODBCSourcePartition {
     }
 }
 
+type ODBCCursor<'a> = RowSetCursor<CursorImpl<StatementConnection<'a>>, &'a mut TextRowSet>;
+type RowSet<'a> = DummyBox<Option<&'a &'a mut TextRowSet>>;
+fn handle_fn<'a>(cursor: *const ODBCCursor<'a>) -> RowSet<'a> {
+    unsafe { DummyBox((&mut *(cursor as *mut ODBCCursor<'a>)).fetch().unwrap()) }
+}
 pub struct ODBCSourcePartitionParser<'a> {
-    rows: OwningHandle<
-        Box<RowSetCursor<CursorImpl<StatementConnection<'a>>, &'a mut TextRowSet>>,
-        DummyBox<Option<&'a &'a mut TextRowSet>>,
-    >,
+    rows: Option<OwningHandle<Box<ODBCCursor<'a>>, RowSet<'a>>>,
     ncols: usize,
     current_row: usize,
     current_col: usize,
@@ -231,33 +233,10 @@ pub struct ODBCSourcePartitionParser<'a> {
 
 impl<'a> ODBCSourcePartitionParser<'a> {
     #[throws(ODBCSourceError)]
-
-    pub fn new(
-        cursor: RowSetCursor<CursorImpl<StatementConnection<'a>>, &'a mut TextRowSet>,
-        schema: &[ODBCTypeSystem],
-    ) -> Self {
-        let rows: OwningHandle<
-            Box<RowSetCursor<CursorImpl<StatementConnection<'a>>, &'a mut TextRowSet>>,
-            DummyBox<Option<&&'a mut TextRowSet>>,
-        > = OwningHandle::new_with_fn(
-            Box::new(cursor),
-            |cursor: *const RowSetCursor<
-                CursorImpl<StatementConnection<'a>>,
-                &'a mut TextRowSet,
-            >| unsafe {
-                DummyBox(
-                    (&mut *(cursor
-                        as *mut RowSetCursor<
-                            CursorImpl<StatementConnection<'a>>,
-                            &'a mut TextRowSet,
-                        >))
-                        .fetch()
-                        .unwrap(),
-                )
-            },
-        );
+    pub fn new(cursor: ODBCCursor<'a>, schema: &[ODBCTypeSystem]) -> Self {
+        let rows = OwningHandle::new_with_fn(Box::new(cursor), handle_fn);
         Self {
-            rows,
+            rows: Some(rows),
             ncols: schema.len(),
             current_row: 0,
             current_col: 0,
@@ -279,27 +258,15 @@ impl<'a> PartitionParser<'a> for ODBCSourcePartitionParser<'a> {
 
     #[throws(ODBCSourceError)]
     fn fetch_next(&mut self) -> (usize, bool) {
-        // if self.current_row > 0 {
-        //     self.rows = OwningHandle::new_with_fn(
-        //         self.rows.into_owner(),
-        //         |cursor: *const RowSetCursor<
-        //             CursorImpl<StatementConnection<'a>>,
-        //             &'a mut TextRowSet,
-        //         >| unsafe {
-        //             DummyBox(
-        //                 (&mut *(cursor
-        //                     as *mut RowSetCursor<
-        //                         CursorImpl<StatementConnection<'a>>,
-        //                         &'a mut TextRowSet,
-        //                     >))
-        //                     .fetch()
-        //                     .unwrap(),
-        //             )
-        //         },
-        //     );
-        // }
+        if self.current_row > 0 {
+            let rows = self.rows.take().expect("empty rows");
+            let rows = rows.into_owner();
+            self.rows = Some(OwningHandle::new_with_fn(rows, handle_fn));
+        }
 
-        let num_rows: usize = match *self.rows {
+        let rows = self.rows.as_ref().expect("empty rows");
+
+        let num_rows: usize = match **rows {
             Some(batch) => batch.num_rows(),
             None => 0,
         };
@@ -315,9 +282,9 @@ impl<'r, 'a> Produce<'r, i32> for ODBCSourcePartitionParser<'a> {
     #[throws(ODBCSourceError)]
     fn produce(&'r mut self) -> i32 {
         let (row, col) = self.next_loc()?;
+        let rows = self.rows.as_ref().expect("empty rows");
 
-        let batch = *self.rows;
-        let value = match batch {
+        let value = match **rows {
             Some(b) => b.at(row, col),
             None => {
                 // TODO: throw an error here
