@@ -16,8 +16,9 @@ use crate::{
 
 // External Libraries 
 use odbc_api::{
-    buffers::{TextRowSet, BufferDescription, BufferKind, ColumnarAnyBuffer, Item},
-    Cursor, CursorImpl, Environment, ResultSetMetadata, RowSetCursor, ColumnDescription, StatementConnection, DataType, Nullability
+    buffers::{BufferDescription, BufferKind, ColumnarAnyBuffer, Item},
+    handles::StatementImpl,
+    Cursor, CursorImpl, Environment, ResultSetMetadata, RowSetCursor, ColumnDescription, DataType, Nullability
 };
 
 use std::convert::TryInto;   // Type Change
@@ -233,11 +234,8 @@ impl SourcePartition for ODBCSourcePartition {
 
 
 
-// Incorrect! 
-// We want to use ColumnarBuffer<AnyColumnBuffer> instead of TextRowSet
-// Statement Connection is not working. 
-type ODBCCursor<'a> = RowSetCursor<CursorImpl<StatementConnection<'a>>, &'a mut TextRowSet>;
-type RowSet<'a> = DummyBox<Option<&'a &'a mut TextRowSet>>;
+type ODBCCursor<'a> = RowSetCursor<CursorImpl<StatementImpl<'a>>, &'a mut ColumnarAnyBuffer>;
+type RowSet<'a> = DummyBox<Option<&'a &'a mut ColumnarAnyBuffer>>;
 
 fn handle_fn<'a>(cursor: *const ODBCCursor<'a>) -> RowSet<'a> {
     unsafe { DummyBox((&mut *(cursor as *mut ODBCCursor<'a>)).fetch().unwrap()) }
