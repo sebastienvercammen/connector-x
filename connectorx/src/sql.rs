@@ -12,7 +12,6 @@ use sqlparser::parser::Parser;
 #[cfg(feature = "src_oracle")]
 use std::any::Any;
 
-
 #[derive(Debug, Clone)]
 pub enum CXQuery<Q = String> {
     Naked(Q),   // The query directly comes from the user
