@@ -221,7 +221,7 @@ where
                         .downcast_mut::<T::Builder>()
                         .ok_or_else(|| anyhow!("cannot cast arrow builder for append"))?,
                     value,
-                )?;
+                );
             }
             None => throw!(anyhow!("arrow arrays are empty!")),
         }

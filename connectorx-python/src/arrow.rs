@@ -1,4 +1,5 @@
 use crate::errors::ConnectorXPythonError;
+use arrow::ffi::{FFI_ArrowArray, FFI_ArrowSchema};
 use arrow::record_batch::RecordBatch;
 use connectorx::source_router::SourceConn;
 use connectorx::{prelude::*, sql::CXQuery};
@@ -38,7 +39,14 @@ pub fn to_ptrs(rbs: Vec<RecordBatch>) -> (Vec<String>, Vec<Vec<(uintptr_t, uintp
         let mut cols = vec![];
 
         for array in rb.columns() {
-            let (array_ptr, schema_ptr) = array.to_raw().expect("c ptr");
+            let array_ptr = Box::new(FFI_ArrowArray::empty());
+            let schema_ptr = Box::new(FFI_ArrowSchema::empty());
+            let array_ptr = Box::into_raw(array_ptr);
+            let schema_ptr = Box::into_raw(schema_ptr);
+            unsafe {
+                arrow::array::export_array_into_raw(array.clone(), array_ptr, schema_ptr)
+                    .expect("export_array_into_raw error");
+            }
             cols.push((array_ptr as uintptr_t, schema_ptr as uintptr_t));
         }
 
