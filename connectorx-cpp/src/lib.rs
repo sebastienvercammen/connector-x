@@ -302,17 +302,18 @@ pub unsafe extern "C" fn connectorx_get_schema(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn connectorx_prepare(iter: *mut Box<dyn RecordBatchIterator>) {
+pub unsafe extern "C" fn connectorx_prepare(iter: *mut Box<dyn RecordBatchIterator>) -> i32 {
     let arrow_iter = unsafe { &mut *iter };
-    arrow_iter.prepare();
+    arrow_iter.prepare()
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn connectorx_iter_next(
     iter: *mut Box<dyn RecordBatchIterator>,
+    id: usize,
 ) -> *mut CXSlice<CXArray> {
     let arrow_iter = unsafe { &mut *iter };
-    match arrow_iter.next_batch() {
+    match arrow_iter.next_batch(id) {
         Some(rb) => {
             let mut cols = vec![];
 

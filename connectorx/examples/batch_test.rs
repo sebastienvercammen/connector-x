@@ -3,6 +3,7 @@ use connectorx::prelude::*;
 use connectorx::sources::postgres::{rewrite_tls_args, BinaryProtocol as PgBinaryProtocol};
 use connectorx::transports::PostgresArrowTransport;
 use postgres::NoTls;
+use std::boxed::Box;
 use std::convert::TryFrom;
 
 fn main() {
@@ -37,21 +38,48 @@ fn main() {
     let source =
         PostgresSource::<PgBinaryProtocol, NoTls>::new(config, NoTls, queries.len()).unwrap();
 
-    let destination = ArrowDestination::new();
+    let destination = ArrowDestination::new_with_batch_size(2048);
 
-    let mut batch_iter: ArrowBatchIter<_, PostgresArrowTransport<PgBinaryProtocol, NoTls>> =
-        ArrowBatchIter::new(source, destination, origin_query, queries, 1024).unwrap();
+    let batch_iter: ArrowBatchIter<_, PostgresArrowTransport<PgBinaryProtocol, NoTls>> =
+        ArrowBatchIter::new(source, destination, origin_query, queries).unwrap();
 
-    batch_iter.prepare();
+    let batch_iter = Box::new(batch_iter);
+    let batch_iter = Box::into_raw(batch_iter);
 
-    let mut num_rows = 0;
-    let mut num_batches = 0;
-    while let Some(record_batch) = batch_iter.next() {
-        let record_batch = record_batch;
-        println!("got 1 batch, with {} rows", record_batch.num_rows());
-        num_rows += record_batch.num_rows();
-        num_batches += 1;
-        // arrow::util::pretty::print_batches(&[record_batch]).unwrap();
-    }
-    println!("got {} batches, {} rows in total", num_batches, num_rows);
+    let ptr = batch_iter as usize;
+
+    std::thread::scope(|s| {
+        for i in 0..queries.len() {
+            println!("spawn {}", i);
+            s.spawn(|| unsafe {
+                let iter =
+                    ptr as *mut ArrowBatchIter<_, PostgresArrowTransport<PgBinaryProtocol, NoTls>>;
+                let id = (*iter).prepare();
+                let mut num_rows = 0;
+                let mut num_batches = 0;
+
+                while let Some(record_batch) = (*iter).next_batch(id as usize) {
+                    let record_batch = record_batch;
+                    println!(
+                        "part {} got 1 batch, with {} rows",
+                        id,
+                        record_batch.num_rows()
+                    );
+                    num_rows += record_batch.num_rows();
+                    num_batches += 1;
+                    // arrow::util::pretty::print_batches(&[record_batch]).unwrap();
+                }
+                println!(
+                    "part {} got {} batches, {} rows in total",
+                    id, num_batches, num_rows
+                );
+            });
+        }
+    });
+
+    unsafe {
+        Box::from_raw(
+            ptr as *mut ArrowBatchIter<_, PostgresArrowTransport<PgBinaryProtocol, NoTls>>,
+        )
+    };
 }

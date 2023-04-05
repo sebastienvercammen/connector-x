@@ -1,10 +1,9 @@
 use crate::{prelude::*, utils::*};
 use arrow::record_batch::RecordBatch;
 use itertools::Itertools;
-use log::debug;
 use owning_ref::OwningHandle;
-use rayon::prelude::*;
 use std::marker::PhantomData;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 type SourceParserHandle<'a, S> = OwningHandle<
     Box<<S as Source>::Partition>,
@@ -19,12 +18,11 @@ where
 {
     dst: ArrowDestination,
     dst_parts: Vec<ArrowPartitionWriter>,
-    src_parts: Option<Vec<S::Partition>>,
-    src_parsers: Vec<SourceParserHandle<'a, S>>,
+    src_parts: Vec<Option<S::Partition>>,
+    src_parsers: Vec<Option<SourceParserHandle<'a, S>>>,
     dorder: DataOrder,
-    src_schema: Vec<S::TypeSystem>,
-    dst_schema: Vec<ArrowTypeSystem>,
-    batch_size: usize,
+    schema: Vec<(S::TypeSystem, ArrowTypeSystem)>,
+    part_idx: AtomicUsize,
     _phantom: PhantomData<TP>,
 }
 
@@ -38,141 +36,79 @@ where
         mut dst: ArrowDestination,
         origin_query: Option<String>,
         queries: &[CXQuery<String>],
-        batch_size: usize,
     ) -> Result<Self, TP::Error> {
         let dispatcher = Dispatcher::<_, _, TP>::new(src, &mut dst, queries, origin_query);
-        let (dorder, src_parts, dst_parts, src_schema, dst_schema) = dispatcher.prepare()?;
+        let (dorder, src_parts, mut dst_parts, src_schema, dst_schema) = dispatcher.prepare()?;
+        let schema: Vec<_> = src_schema
+            .into_iter()
+            .zip_eq(dst_schema)
+            .map(|(src_ty, dst_ty)| (src_ty, dst_ty))
+            .collect();
+
+        // set arrow dst partitions as detached, so we can access them without lock
+        dst_parts.iter_mut().for_each(|d| d.set_detach());
+
+        let mut src_parsers = Vec::new();
+        src_parsers.resize_with(src_parts.len(), || None);
 
         Ok(Self {
             dst,
             dst_parts,
-            src_parts: Some(src_parts),
-            src_parsers: vec![],
+            src_parts: src_parts.into_iter().map(Some).collect(),
+            src_parsers,
             dorder,
-            src_schema,
-            dst_schema,
-            batch_size,
+            schema,
+            part_idx: AtomicUsize::new(0),
             _phantom: PhantomData,
         })
     }
 
-    fn run_batch(&mut self) -> Result<(), TP::Error> {
-        let schemas: Vec<_> = self
-            .src_schema
-            .iter()
-            .zip_eq(&self.dst_schema)
-            .map(|(&src_ty, &dst_ty)| (src_ty, dst_ty))
-            .collect();
+    fn run_batch(&mut self, id: usize) -> Result<Option<RecordBatch>, TP::Error> {
+        let dst = &mut self.dst_parts[id];
+        let parser = (&mut self.src_parsers[id]).as_deref_mut().unwrap();
 
-        debug!("Start writing");
-
-        let dorder = self.dorder;
-        let batch_size = self.batch_size;
-
-        // parse and write
-        self.dst_parts
-            .par_iter_mut()
-            .zip_eq(self.src_parsers.par_iter_mut())
-            .enumerate()
-            .try_for_each(|(i, (dst, src))| -> Result<(), TP::Error> {
-                let parser: &mut <S::Partition as crate::sources::SourcePartition>::Parser<'_> =
-                    &mut *src;
-                let mut processed_rows = 0;
-
-                match dorder {
-                    DataOrder::RowMajor => loop {
-                        let (mut n, is_last) = parser.fetch_next()?;
-                        n = std::cmp::min(n, batch_size - processed_rows); // only process until batch size is reached
-                        processed_rows += n;
-                        dst.aquire_row(n)?;
-                        for _ in 0..n {
-                            #[allow(clippy::needless_range_loop)]
-                            for col in 0..dst.ncols() {
-                                {
-                                    let (s1, s2) = schemas[col];
-                                    TP::process(s1, s2, parser, dst)?;
-                                }
-                            }
+        match self.dorder {
+            DataOrder::RowMajor => loop {
+                let (n, is_last) = parser.fetch_next()?;
+                dst.aquire_row(n)?;
+                for _ in 0..n {
+                    #[allow(clippy::needless_range_loop)]
+                    for col in 0..dst.ncols() {
+                        {
+                            let (s1, s2) = self.schema[col];
+                            TP::process(s1, s2, parser, dst)?;
                         }
-                        if is_last || processed_rows >= batch_size {
-                            break;
-                        }
-                    },
-                    DataOrder::ColumnMajor => loop {
-                        let (mut n, is_last) = parser.fetch_next()?;
-                        n = std::cmp::min(n, batch_size - processed_rows);
-                        processed_rows += n;
-                        dst.aquire_row(n)?;
-                        #[allow(clippy::needless_range_loop)]
-                        for col in 0..dst.ncols() {
-                            for _ in 0..n {
-                                {
-                                    let (s1, s2) = schemas[col];
-                                    TP::process(s1, s2, parser, dst)?;
-                                }
-                            }
-                        }
-                        if is_last || processed_rows >= batch_size {
-                            break;
-                        }
-                    },
+                    }
                 }
-
-                debug!("Finalize partition {}", i);
-                dst.finalize()?;
-                debug!("Partition {} finished", i);
-                Ok(())
-            })?;
-        Ok(())
-    }
-}
-
-impl<'a, S, TP> Iterator for ArrowBatchIter<'a, S, TP>
-where
-    S: Source + 'a,
-    TP: Transport<TSS = S::TypeSystem, TSD = ArrowTypeSystem, S = S, D = ArrowDestination>,
-{
-    type Item = RecordBatch;
-    fn next(&mut self) -> Option<Self::Item> {
-        let res = self.dst.record_batch().unwrap();
-        if res.is_some() {
-            return res;
+                if is_last || dst.is_batch_full() {
+                    break;
+                }
+            },
+            DataOrder::ColumnMajor => loop {
+                let (n, is_last) = parser.fetch_next()?;
+                dst.aquire_row(n)?;
+                #[allow(clippy::needless_range_loop)]
+                for col in 0..dst.ncols() {
+                    for _ in 0..n {
+                        {
+                            let (s1, s2) = self.schema[col];
+                            TP::process(s1, s2, parser, dst)?;
+                        }
+                    }
+                }
+                if is_last || dst.is_batch_full() {
+                    break;
+                }
+            },
         }
-        self.run_batch().unwrap();
-        self.dst.record_batch().unwrap()
+        Ok(dst.generate_batch()?)
     }
 }
-
-// impl<'a, S, TP> Iterator for ArrowBatchIter<'a, S, TP>
-// where
-//     S: Source + 'a,
-//     TP: Transport<TSS = S::TypeSystem, TSD = ArrowTypeSystem, S = S, D = ArrowDestination>,
-// {
-//     type Item = Result<RecordBatch, TP::Error>;
-//     fn next(&mut self) -> Option<Self::Item> {
-//         match self.dst.record_batch() {
-//             Ok(Some(res)) => return Some(Ok(res)),
-//             Ok(None) => {}
-//             Err(e) => return Some(Err(e.into())),
-//         }
-
-//         match self.run_batch() {
-//             Err(e) => return Some(Err(e)),
-//             Ok(()) => {}
-//         }
-
-//         match self.dst.record_batch() {
-//             Err(e) => Some(Err(e.into())),
-//             Ok(Some(res)) => Some(Ok(res)),
-//             Ok(None) => None,
-//         }
-//     }
-// }
 
 pub trait RecordBatchIterator {
     fn get_schema(&self) -> (RecordBatch, &[String]);
-    fn prepare(&mut self);
-    fn next_batch(&mut self) -> Option<RecordBatch>;
+    fn prepare(&mut self) -> i32;
+    fn next_batch(&mut self, id: usize) -> Option<RecordBatch>;
 }
 
 impl<'a, S, TP> RecordBatchIterator for ArrowBatchIter<'a, S, TP>
@@ -184,19 +120,22 @@ where
         (self.dst.empty_batch(), self.dst.names())
     }
 
-    fn prepare(&mut self) {
-        let src_parts = self.src_parts.take().unwrap();
-        self.src_parsers = src_parts
-            .into_par_iter()
-            .map(|part| {
-                OwningHandle::new_with_fn(Box::new(part), |part: *const S::Partition| unsafe {
-                    DummyBox((*(part as *mut S::Partition)).parser().unwrap())
-                })
-            })
-            .collect();
+    fn prepare(&mut self) -> i32 {
+        let id = self.part_idx.fetch_add(1, Ordering::SeqCst);
+        if id >= self.src_parts.len() {
+            return -1;
+        }
+        let src_part = self.src_parts[id].take().unwrap();
+        self.src_parsers[id] = Some(OwningHandle::new_with_fn(
+            Box::new(src_part),
+            |src_part: *const S::Partition| unsafe {
+                DummyBox((*(src_part as *mut S::Partition)).parser().unwrap())
+            },
+        ));
+        id as i32
     }
 
-    fn next_batch(&mut self) -> Option<RecordBatch> {
-        self.next()
+    fn next_batch(&mut self, id: usize) -> Option<RecordBatch> {
+        self.run_batch(id).unwrap()
     }
 }

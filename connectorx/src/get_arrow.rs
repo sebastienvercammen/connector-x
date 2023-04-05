@@ -241,7 +241,7 @@ pub fn new_record_batch_iter(
     queries: &[CXQuery<String>],
     batch_size: usize,
 ) -> Box<dyn RecordBatchIterator> {
-    let destination = ArrowDestination::new();
+    let destination = ArrowDestination::new_with_batch_size(batch_size);
     let protocol = source_conn.proto.as_str();
     debug!("Protocol: {}", protocol);
 
@@ -257,14 +257,13 @@ pub fn new_record_batch_iter(
                         queries.len(),
                     )
                     .unwrap();
-                    let batch_iter = ArrowBatchIter::<
-                        '_,
-                        _,
-                        PostgresArrowTransport<CSVProtocol, MakeTlsConnector>,
-                    >::new(
-                        source, destination, origin_query, queries, batch_size
-                    )
-                    .unwrap();
+                    let batch_iter =
+                        ArrowBatchIter::<
+                            '_,
+                            _,
+                            PostgresArrowTransport<CSVProtocol, MakeTlsConnector>,
+                        >::new(source, destination, origin_query, queries)
+                        .unwrap();
                     return Box::new(batch_iter);
                 }
                 ("csv", None) => {
@@ -276,7 +275,7 @@ pub fn new_record_batch_iter(
                         _,
                         PostgresArrowTransport<CSVProtocol, NoTls>,
                     >::new(
-                        source, destination, origin_query, queries, batch_size
+                        source, destination, origin_query, queries
                     )
                     .unwrap();
                     return Box::new(batch_iter);
@@ -288,14 +287,13 @@ pub fn new_record_batch_iter(
                         queries.len(),
                     )
                     .unwrap();
-                    let batch_iter = ArrowBatchIter::<
-                        '_,
-                        _,
-                        PostgresArrowTransport<PgBinaryProtocol, MakeTlsConnector>,
-                    >::new(
-                        source, destination, origin_query, queries, batch_size
-                    )
-                    .unwrap();
+                    let batch_iter =
+                        ArrowBatchIter::<
+                            '_,
+                            _,
+                            PostgresArrowTransport<PgBinaryProtocol, MakeTlsConnector>,
+                        >::new(source, destination, origin_query, queries)
+                        .unwrap();
                     return Box::new(batch_iter);
                 }
                 ("binary", None) => {
@@ -310,7 +308,7 @@ pub fn new_record_batch_iter(
                         _,
                         PostgresArrowTransport<PgBinaryProtocol, NoTls>,
                     >::new(
-                        source, destination, origin_query, queries, batch_size
+                        source, destination, origin_query, queries
                     )
                     .unwrap();
                     return Box::new(batch_iter);
@@ -322,14 +320,13 @@ pub fn new_record_batch_iter(
                         queries.len(),
                     )
                     .unwrap();
-                    let batch_iter = ArrowBatchIter::<
-                        '_,
-                        _,
-                        PostgresArrowTransport<CursorProtocol, MakeTlsConnector>,
-                    >::new(
-                        source, destination, origin_query, queries, batch_size
-                    )
-                    .unwrap();
+                    let batch_iter =
+                        ArrowBatchIter::<
+                            '_,
+                            _,
+                            PostgresArrowTransport<CursorProtocol, MakeTlsConnector>,
+                        >::new(source, destination, origin_query, queries)
+                        .unwrap();
                     return Box::new(batch_iter);
                 }
                 ("cursor", None) => {
@@ -341,7 +338,7 @@ pub fn new_record_batch_iter(
                         _,
                         PostgresArrowTransport<CursorProtocol, NoTls>,
                     >::new(
-                        source, destination, origin_query, queries, batch_size
+                        source, destination, origin_query, queries
                     )
                     .unwrap();
                     return Box::new(batch_iter);
@@ -361,7 +358,6 @@ pub fn new_record_batch_iter(
                         destination,
                         origin_query,
                         queries,
-                        batch_size,
                     )
                     .unwrap();
                 return Box::new(batch_iter);
@@ -374,7 +370,6 @@ pub fn new_record_batch_iter(
                     destination,
                     origin_query,
                     queries,
-                    batch_size,
                 )
                 .unwrap();
                 return Box::new(batch_iter);
@@ -391,7 +386,6 @@ pub fn new_record_batch_iter(
                 destination,
                 origin_query,
                 queries,
-                batch_size,
             )
             .unwrap();
             return Box::new(batch_iter);
@@ -405,7 +399,6 @@ pub fn new_record_batch_iter(
                 destination,
                 origin_query,
                 queries,
-                batch_size,
             )
             .unwrap();
             return Box::new(batch_iter);
@@ -418,7 +411,6 @@ pub fn new_record_batch_iter(
                 destination,
                 origin_query,
                 queries,
-                batch_size,
             )
             .unwrap();
             return Box::new(batch_iter);
@@ -432,7 +424,6 @@ pub fn new_record_batch_iter(
                 destination,
                 origin_query,
                 queries,
-                batch_size,
             )
             .unwrap();
             return Box::new(batch_iter);

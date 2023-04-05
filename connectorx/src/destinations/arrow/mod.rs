@@ -155,6 +155,7 @@ pub struct ArrowPartitionWriter {
     data: Arc<Mutex<Vec<RecordBatch>>>,
     arrow_schema: Arc<Schema>,
     batch_size: usize,
+    detach_flag: bool,
 }
 
 // unsafe impl Sync for ArrowPartitionWriter {}
@@ -175,9 +176,18 @@ impl ArrowPartitionWriter {
             data,
             arrow_schema,
             batch_size,
+            detach_flag: false,
         };
         pw.allocate()?;
         pw
+    }
+
+    pub fn set_detach(&mut self) {
+        self.detach_flag = true;
+    }
+
+    pub fn is_batch_full(&self) -> bool {
+        self.current_row >= self.batch_size
     }
 
     #[throws(ArrowDestinationError)]
@@ -213,6 +223,27 @@ impl ArrowPartitionWriter {
 
         self.current_row = 0;
         self.current_col = 0;
+    }
+
+    #[throws(ArrowDestinationError)]
+    pub fn generate_batch(&mut self) -> Option<RecordBatch> {
+        if self.current_row == 0 {
+            return None;
+        }
+
+        let builders = self
+            .builders
+            .take()
+            .unwrap_or_else(|| panic!("arrow builder is none when flush!"));
+        let columns = builders
+            .into_iter()
+            .zip(self.schema.iter())
+            .map(|(builder, &dt)| Realize::<FFinishBuilder>::realize(dt)?(builder))
+            .collect::<std::result::Result<Vec<_>, crate::errors::ConnectorXError>>()?;
+        let rb = RecordBatch::try_new(Arc::clone(&self.arrow_schema), columns)?;
+        self.current_row = 0;
+        self.current_col = 0;
+        Some(rb)
     }
 }
 
@@ -264,9 +295,14 @@ where
             }
         }
 
-        // flush if exceed batch_size
         if self.current_col == 0 {
             self.current_row += 1;
+
+            // do not flush to a global location if the partition is detached
+            if self.detach_flag {
+                return;
+            }
+            // flush if exceed batch_size
             if self.current_row >= self.batch_size {
                 self.flush()?;
                 self.allocate()?;
