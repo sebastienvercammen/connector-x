@@ -290,11 +290,11 @@ dependencies = [
 
 [[package]]
 name = "async-native-tls"
-version = "0.3.3"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9e9e7a929bd34c68a82d58a4de7f86fffdaf97fb2af850162a7bb19dd7269b33"
+checksum = "d57d4cec3c647232e1094dc013546c0b33ce785d8aeb251e1f20dfaf8a9a13fe"
 dependencies = [
- "async-std",
+ "futures-util",
  "native-tls",
  "thiserror",
  "url",
@@ -326,7 +326,7 @@ version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "22068c0c19514942eefcfd4daf8976ef1aad84e61539f95cd200c35202f80af5"
 dependencies = [
- "async-stream-impl 0.2.1",
+ "async-stream-impl",
  "futures-core",
 ]
 
@@ -455,9 +455,9 @@ dependencies = [
 
 [[package]]
 name = "bb8-tiberius"
-version = "0.5.2"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "648d5365b34a2a362d5b8790d3c1b230d263d2377e563c76cb79c10d326b917e"
+checksum = "d8a33c87124c1938413e45ab6a6655e49d9e4cd015e05db61d6ab5a4f96b2c83"
 dependencies = [
  "async-trait",
  "bb8",
@@ -1826,7 +1826,7 @@ version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "09ab5966c98f6d4e71e247cda6a6d8497bc8a1df3a4ba9ee548087842cffc21d"
 dependencies = [
- "async-stream 0.3.5",
+ "async-stream",
  "hyper",
  "hyper-rustls 0.23.2",
  "log",
@@ -4702,12 +4702,12 @@ dependencies = [
 
 [[package]]
 name = "tiberius"
-version = "0.5.16"
+version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e08c782c165a53700c17e4b15a1f6facc21e40a6a80402c518e0f3a2c3fcedd4"
+checksum = "833311bc8e26e96c73ad1b5c1f488c588808c747a318905ec67e43d422ea2c08"
 dependencies = [
  "async-native-tls",
- "async-stream 0.2.1",
+ "async-stream",
  "async-trait",
  "asynchronous-codec",
  "byteorder",
@@ -4727,6 +4727,8 @@ dependencies = [
  "pretty-hex",
  "rust_decimal",
  "thiserror",
+ "tokio",
+ "tokio-util 0.6.10",
  "tracing",
  "uuid 0.8.2",
  "winauth",
